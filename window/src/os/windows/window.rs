@@ -1612,11 +1612,6 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
     let inner = rc_from_hwnd(hwnd)?;
     let mut inner = inner.borrow_mut();
 
-    if inner.paint_throttled {
-        inner.invalidated = true;
-        return Some(0);
-    }
-
     let mut ps = PAINTSTRUCT {
         fErase: 0,
         fIncUpdate: 0,
@@ -1633,6 +1628,14 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
     let _ = BeginPaint(hwnd, &mut ps);
     // Do nothing right now
     EndPaint(hwnd, &mut ps);
+
+    if inner.paint_throttled {
+        // The update region is validated above, so Windows stops
+        // re-synthesizing WM_PAINT while the throttle runs; the throttle
+        // timer re-invalidates the window when this flag is set.
+        inner.invalidated = true;
+        return Some(0);
+    }
 
     inner.invalidated = false;
     // Ask the app to repaint in a bit
