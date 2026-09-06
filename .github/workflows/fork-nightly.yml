@@ -53,7 +53,7 @@ jobs:
             git push --force-with-lease origin HEAD:windows-paint-throttle
           fi
           sha=$(git rev-parse HEAD)
-          built=$(gh release view nightly --json body --jq '.body' 2>/dev/null | grep -o 'fork commit [0-9a-f]*' | awk '{print $3}' || true)
+          built=$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json body --jq '.body' 2>/dev/null | grep -o 'fork commit [0-9a-f]*' | awk '{print $3}' || true)
           if [ "$built" = "$sha" ]; then
             echo "the nightly release already carries $sha"
             echo "changed=false" >> "$GITHUB_OUTPUT"
