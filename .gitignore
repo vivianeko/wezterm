@@ -1,0 +1,4 @@
+# Leftovers from checking out the source branches in the same clone.
+/target
+/deps
+/vendor

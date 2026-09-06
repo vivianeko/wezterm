@@ -1,0 +1,157 @@
+# This fork's only workflow. It lives on the `ci` branch, the fork's default
+# branch, because GitHub fires `schedule` triggers from the default branch only.
+# The fix itself is the single commit on `windows-paint-throttle`, kept rebased
+# on the commit upstream built its latest Windows nightly from. Upstream's own
+# workflows never run here: `main` mirrors upstream and is never the default.
+name: fork_nightly
+
+on:
+  schedule:
+    # Upstream's windows_continuous schedule runs at 03:10 UTC and takes about
+    # 40 minutes; the second run picks up nightlies that a daytime push built.
+    - cron: "0 5 * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - ci
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.rebase.outputs.sha }}
+      base: ${{ steps.rebase.outputs.base }}
+      changed: ${{ steps.rebase.outputs.changed }}
+    steps:
+      - name: "checkout fix branch"
+        uses: actions/checkout@v5
+        with:
+          ref: windows-paint-throttle
+          fetch-depth: 0
+      - name: "Rebase onto upstream's latest Windows nightly commit"
+        id: rebase
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          base=$(gh api "repos/wezterm/wezterm/actions/workflows/gen_windows_continuous.yml/runs?status=success&branch=main&per_page=1" --jq '.workflow_runs[0].head_sha')
+          echo "upstream nightly commit: $base"
+          git remote add upstream https://github.com/wezterm/wezterm.git
+          git fetch --no-tags upstream "$base"
+          old_base=$(git merge-base HEAD "$base")
+          if [ "$old_base" = "$base" ]; then
+            echo "already based on $base"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git rebase --onto "$base" "$old_base"
+            git push --force-with-lease origin HEAD:windows-paint-throttle
+          fi
+          sha=$(git rev-parse HEAD)
+          built=$(gh release view nightly --json body --jq '.body' 2>/dev/null | grep -o 'fork commit [0-9a-f]*' | awk '{print $3}' || true)
+          if [ "$built" = "$sha" ]; then
+            echo "the nightly release already carries $sha"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: "windows-2025"
+    env:
+      BUILD_REASON: "Schedule"
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+          submodules: "recursive"
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: "x86_64-pc-windows-msvc"
+      - name: "Compile with sccache"
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: "Cache Rust Dependencies"
+        uses: actions/cache@v4
+        id: cache-cargo-vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: "cargo-deps-${{ hashFiles('**/Cargo.lock') }}"
+      - name: "Vendor dependecies"
+        if: steps.cache-cargo-vendor.outputs.cache-hit != 'true'
+        shell: bash
+        run: "cargo vendor --locked --versioned-dirs >> .cargo/config"
+      - name: "Build wezterm (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p wezterm --release
+      - name: "Build wezterm-gui (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p wezterm-gui --release
+      - name: "Build wezterm-mux-server (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p wezterm-mux-server --release
+      - name: "Build strip-ansi-escapes (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p strip-ansi-escapes --release
+      - name: "Package"
+        shell: bash
+        run: "bash ci/deploy.sh"
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: "windows"
+          path: |
+            WezTerm-*.zip
+            WezTerm-*.exe
+          retention-days: 5
+
+  upload:
+    needs: [sync, build]
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+      - name: "Download artifact"
+        uses: actions/download-artifact@v8
+        with:
+          name: "windows"
+      - name: "Checksum"
+        shell: bash
+        run: "for f in WezTerm-*.zip WezTerm-*.exe ; do sha256sum $f > $f.sha256 ; done"
+      - name: "Upload to this fork's nightly release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="Upstream nightly commit ${{ needs.sync.outputs.base }} plus the Windows paint-throttle fix, fork commit ${{ needs.sync.outputs.sha }} (branch windows-paint-throttle). Built by fork-nightly.yml on the ci branch."
+          gh release view nightly >/dev/null 2>&1 || gh release create --prerelease --title nightly --notes "$notes" nightly
+          bash ci/retry.sh gh release upload --clobber nightly WezTerm-*.zip WezTerm-*.exe *.sha256
+          gh release edit nightly --notes "$notes"
