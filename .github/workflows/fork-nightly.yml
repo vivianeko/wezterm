@@ -34,9 +34,8 @@ jobs:
           fetch-depth: 0
           # The rebased branch carries upstream's edits to its own workflow
           # files, and GitHub refuses that push from GITHUB_TOKEN. The secret
-          # is a fine-grained token for this repository with Contents and
-          # Workflows write access.
-          token: ${{ secrets.FORK_PUSH_TOKEN || github.token }}
+          # is the private half of this repository's write deploy key.
+          ssh-key: ${{ secrets.FORK_DEPLOY_KEY }}
       - name: "Rebase onto upstream's latest Windows nightly commit"
         id: rebase
         shell: bash
