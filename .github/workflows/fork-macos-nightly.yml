@@ -148,6 +148,8 @@ jobs:
           "$app/Contents/MacOS/wezterm" --skip-config --config 'font_rasterizer="CoreText"' ls-fonts --text 'AgimMW 0123456789' --rasterize-ascii > coretext-glyphs.txt
           ditto -c -k --keepParent "${app%/WezTerm.app}" WezTerm-macos-nightly.zip
           shasum -a 256 WezTerm-macos-nightly.zip > WezTerm-macos-nightly.zip.sha256
+          version=${app%/WezTerm.app}
+          printf '%s\n' "${version#WezTerm-macos-}" > macos-version.txt
       - uses: actions/upload-artifact@v7
         with:
           name: macos-coretext
@@ -155,6 +157,7 @@ jobs:
             WezTerm-macos-nightly.zip
             WezTerm-macos-nightly.zip.sha256
             coretext-glyphs.txt
+            macos-version.txt
           retention-days: 14
 
   upload:
@@ -164,6 +167,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ci
+          ssh-key: ${{ secrets.FORK_DEPLOY_KEY }}
       - uses: actions/download-artifact@v8
         with:
           name: macos-coretext
@@ -180,3 +187,37 @@ jobs:
           gh release view macos-nightly >/dev/null 2>&1 || gh release create --prerelease --title 'macOS nightly' --notes-file notes.txt macos-nightly
           gh release upload --clobber macos-nightly WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
           gh release edit macos-nightly --notes-file notes.txt
+      - name: Update the fork's Homebrew cask
+        env:
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat macos-version.txt)
+          checksum=$(awk '{print $1}' WezTerm-macos-nightly.zip.sha256)
+          mkdir -p Casks
+          cat > Casks/wezterm-fork.rb <<EOF
+          cask "wezterm-fork" do
+            version "$version"
+            sha256 "$checksum"
+
+            url "https://github.com/$GH_REPO/releases/download/macos-nightly/WezTerm-macos-nightly.zip"
+            name "WezTerm"
+            desc "Terminal emulator with native macOS CoreText rendering"
+            homepage "https://github.com/$GH_REPO"
+
+            conflicts_with cask: ["wezterm", "wezterm@nightly"]
+
+            app "WezTerm-macos-#{version}/WezTerm.app"
+            binary "#{appdir}/WezTerm.app/Contents/MacOS/wezterm"
+            binary "#{appdir}/WezTerm.app/Contents/MacOS/wezterm-gui"
+            binary "#{appdir}/WezTerm.app/Contents/MacOS/wezterm-mux-server"
+          end
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/wezterm-fork.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "cask: update macOS CoreText build to $version"
+            git push origin HEAD:ci
+          fi

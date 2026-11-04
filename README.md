@@ -21,8 +21,8 @@ The patch is based on upstream PR #7979. It does not change Windows rendering.
   new nightly.
 - `macos-coretext`: upstream's latest macOS nightly commit plus the CoreText
   renderer. Its workflow rebases it independently of the Windows branch.
-- `ci`: the default branch. It holds only this file and
-  the fork's two workflow files, because GitHub runs scheduled
+- `ci`: the default branch. It holds this file, the fork's Homebrew cask, and
+  the two workflow files, because GitHub runs scheduled
   workflows from the default branch only. Keeping upstream's workflow files
   off the default branch means none of them run here.
 - `main`: a mirror of upstream `main`. Nothing runs from it.
@@ -49,3 +49,8 @@ Workflow pull requests build and test an artifact without publishing it. Manual
 runs also produce artifacts by default; enable `publish` to update the release.
 The `source_ref` input can validate another branch or commit, but cannot be
 combined with publication.
+
+Each published macOS build updates `Casks/wezterm-fork.rb` with its exact
+version and SHA-256. Install it through the `vivianeko/wezterm` tap, using
+`https://github.com/vivianeko/wezterm` as the tap URL. This keeps Homebrew
+updates on the fork rather than replacing the app with an upstream build.
