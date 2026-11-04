@@ -184,11 +184,14 @@ jobs:
         run: |
           set -euo pipefail
           printf 'Upstream macOS nightly commit %s plus the experimental CoreText renderer, fork commit %s (branch macos-coretext).\n' "$BASE" "$SHA" > notes.txt
-          gh release view macos-nightly >/dev/null 2>&1 || gh release create --prerelease --title 'macOS nightly' --notes-file notes.txt macos-nightly
+          version=$(cat macos-version.txt)
+          gh release view "macos-$version" >/dev/null 2>&1 || gh release create --prerelease --target "$SHA" --title "macOS $version" --notes-file notes.txt "macos-$version"
+          gh release upload --clobber "macos-$version" WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
+          gh release view macos-nightly >/dev/null 2>&1 || gh release create --prerelease --target "$SHA" --title 'macOS nightly' --notes 'macOS build publication in progress.' macos-nightly
           gh release upload --clobber macos-nightly WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
-          gh release edit macos-nightly --notes-file notes.txt
       - name: Update the fork's Homebrew cask
         env:
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
@@ -201,7 +204,7 @@ jobs:
             version "$version"
             sha256 "$checksum"
 
-            url "https://github.com/$GH_REPO/releases/download/macos-nightly/WezTerm-macos-nightly.zip"
+            url "https://github.com/$GH_REPO/releases/download/macos-#{version}/WezTerm-macos-nightly.zip"
             name "WezTerm"
             desc "Terminal emulator with native macOS CoreText rendering"
             homepage "https://github.com/$GH_REPO"
@@ -221,3 +224,4 @@ jobs:
             git commit -m "cask: update macOS CoreText build to $version"
             git push origin HEAD:ci
           fi
+          gh release edit macos-nightly --notes-file notes.txt

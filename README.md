@@ -51,6 +51,7 @@ The `source_ref` input can validate another branch or commit, but cannot be
 combined with publication.
 
 Each published macOS build updates `Casks/wezterm-fork.rb` with its exact
-version and SHA-256. Install it through the `vivianeko/wezterm` tap, using
+version and SHA-256, using a versioned release URL so a newer nightly cannot
+invalidate an older cask's checksum. Install it through the `vivianeko/wezterm` tap, using
 `https://github.com/vivianeko/wezterm` as the tap URL. This keeps Homebrew
 updates on the fork rather than replacing the app with an upstream build.
