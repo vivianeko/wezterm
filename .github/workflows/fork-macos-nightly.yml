@@ -93,7 +93,7 @@ jobs:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: actions/cache@v4
         id: vendor
@@ -134,10 +134,8 @@ jobs:
         run: cargo test --locked --release -p wezterm-font --lib rasterizer::core_text::tests -- --nocapture
       - name: Build Apple Silicon binaries
         run: cargo build --locked --release --target aarch64-apple-darwin -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
-      - name: Build Intel binaries
-        run: cargo build --locked --release --target x86_64-apple-darwin -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
-      - name: Package the universal app
-        run: bash ci/deploy.sh
+      - name: Package the Apple Silicon app
+        run: bash ci/deploy.sh target/aarch64-apple-darwin
       - name: Sign and verify the local app bundle
         shell: bash
         run: |
@@ -213,6 +211,7 @@ jobs:
             desc "Terminal emulator with native macOS CoreText rendering"
             homepage "https://github.com/$GH_REPO"
 
+            depends_on arch: :arm64
             conflicts_with cask: ["wezterm", "wezterm@nightly"]
 
             app "WezTerm-macos-#{version}/WezTerm.app"

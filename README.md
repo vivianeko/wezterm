@@ -40,7 +40,7 @@ rebase conflicts, the run fails, and the release stops advancing until the
 branch is rebased by hand.
 
 The separate `macos-nightly` release holds `WezTerm-macos-nightly.zip` and its
-SHA-256 file. It includes Apple Silicon and Intel binaries in one app. The
+SHA-256 file. It supports Apple Silicon Macs. The
 bundle is ad hoc signed and is not notarized by Apple. macOS builds and updates
 do not block the Windows release.
 
