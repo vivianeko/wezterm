@@ -1,0 +1,182 @@
+name: fork_macos_nightly
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source branch or commit to validate instead of the maintained branch"
+        type: string
+        default: ""
+      publish:
+        description: "Publish the validated build to macos-nightly"
+        type: boolean
+        default: false
+  pull_request:
+    branches: [ci]
+    paths: [.github/workflows/fork-macos-nightly.yml]
+  push:
+    branches: [ci]
+    paths: [.github/workflows/fork-macos-nightly.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-macos-nightly-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'release' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      base: ${{ steps.source.outputs.base }}
+      changed: ${{ steps.source.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || 'macos-coretext' }}
+          fetch-depth: 0
+          ssh-key: ${{ (github.event_name == 'schedule' || github.event_name == 'push' || inputs.publish) && secrets.FORK_DEPLOY_KEY || '' }}
+      - name: Select and update the macOS source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          PUBLISH: ${{ github.event_name == 'schedule' || github.event_name == 'push' || inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$SOURCE_REF" ] && [ "$PUBLISH" = true ]; then
+            echo "An overridden source ref is for validation only." >&2
+            exit 1
+          fi
+          base=$(gh api "repos/wezterm/wezterm/actions/workflows/gen_macos_continuous.yml/runs?status=success&branch=main&per_page=1" --jq '.workflow_runs[0].head_sha')
+          git remote add upstream https://github.com/wezterm/wezterm.git
+          git fetch --no-tags upstream "$base"
+          if [ "$PUBLISH" = true ]; then
+            old_base=$(git merge-base HEAD "$base")
+            if [ "$old_base" != "$base" ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git rebase --onto "$base" "$old_base"
+              git push --force-with-lease origin HEAD:macos-coretext
+            fi
+          fi
+          sha=$(git rev-parse HEAD)
+          built=$(gh release view macos-nightly --repo "$GITHUB_REPOSITORY" --json body --jq '.body' 2>/dev/null | grep -o 'fork commit [0-9a-f]*' | awk '{print $3}' || true)
+          changed=true
+          if [ "$PUBLISH" = true ] && [ "$built" = "$sha" ]; then
+            changed=false
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: macos-latest
+    env:
+      BUILD_REASON: Schedule
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      MACOSX_DEPLOYMENT_TARGET: "10.12"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: actions/cache@v4
+        id: vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: macos-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+      - name: Vendor dependencies
+        if: steps.vendor.outputs.cache-hit != 'true'
+        run: cargo vendor --locked --versioned-dirs >> .cargo/config
+      - name: Install system dependencies
+        run: env CI=yes ./get-deps
+      - name: Verify the regression test detects missing glyph drawing
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=wezterm-font/src/rasterizer/core_text.rs
+          cp "$file" "$RUNNER_TEMP/core_text.rs"
+          trap 'cp "$RUNNER_TEMP/core_text.rs" "$file"' EXIT
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("wezterm-font/src/rasterizer/core_text.rs")
+          source = p.read_text()
+          call = "ct_font.draw_glyphs(&[glyph], &[position], ctx);"
+          assert source.count(call) == 1
+          p.write_text(source.replace(call, ""))
+          PY
+          status=0
+          cargo test --locked --release -p wezterm-font --lib rasterizer::core_text::tests -- --nocapture > "$RUNNER_TEMP/coretext-red.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/coretext-red.log"
+          if [ "$status" = 0 ]; then
+            echo "The regression test passed without drawing glyphs." >&2
+            exit 1
+          fi
+          grep -q 'has no visible ink' "$RUNNER_TEMP/coretext-red.log"
+      - name: Test the restored CoreText renderer
+        run: cargo test --locked --release -p wezterm-font --lib rasterizer::core_text::tests -- --nocapture
+      - name: Build Apple Silicon binaries
+        run: cargo build --locked --release --target aarch64-apple-darwin -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
+      - name: Build Intel binaries
+        run: cargo build --locked --release --target x86_64-apple-darwin -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
+      - name: Package the universal app
+        run: bash ci/deploy.sh
+      - name: Sign and verify the local app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find WezTerm-macos-* -type d -name WezTerm.app -print -quit)
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/wezterm" --skip-config --config 'font_rasterizer="CoreText"' ls-fonts --text 'AgimMW 0123456789' --rasterize-ascii > coretext-glyphs.txt
+          ditto -c -k --keepParent "${app%/WezTerm.app}" WezTerm-macos-nightly.zip
+          shasum -a 256 WezTerm-macos-nightly.zip > WezTerm-macos-nightly.zip.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-coretext
+          path: |
+            WezTerm-macos-nightly.zip
+            WezTerm-macos-nightly.zip.sha256
+            coretext-glyphs.txt
+          retention-days: 14
+
+  upload:
+    needs: [sync, build]
+    if: needs.sync.outputs.changed == 'true' && (github.event_name == 'schedule' || github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-coretext
+      - name: Publish the macOS nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE: ${{ needs.sync.outputs.base }}
+          SHA: ${{ needs.sync.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Upstream macOS nightly commit %s plus the experimental CoreText renderer, fork commit %s (branch macos-coretext).\n' "$BASE" "$SHA" > notes.txt
+          gh release view macos-nightly >/dev/null 2>&1 || gh release create --prerelease --title 'macOS nightly' --notes-file notes.txt macos-nightly
+          gh release upload --clobber macos-nightly WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
+          gh release edit macos-nightly --notes-file notes.txt
