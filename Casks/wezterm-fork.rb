@@ -1,6 +1,6 @@
 cask "wezterm-fork" do
-  version "20261104-012110-9d314986"
-  sha256 "cd58921ad6d68de08b4942ec36470ff24e56c93e46d03154264afd9023e91ab4"
+  version "20261104-022957-4f18e7a0"
+  sha256 "6c87a3aaaccab199632dafdebc3678ce13149b55ae521b3c44d768912c20125b"
 
   url "https://github.com/vivianeko/wezterm/releases/download/macos-#{version}/WezTerm-macos-nightly.zip"
   name "WezTerm"

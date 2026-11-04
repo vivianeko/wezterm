@@ -12,6 +12,8 @@ alone schedules the next paint.
 
 On macOS, an experimental CoreText renderer uses the native font drawing APIs
 instead of FreeType. Select it with `config.font_rasterizer = "CoreText"`.
+Use `config.core_text_font_smoothing = false` to disable extra stroke
+thickening while keeping antialiasing and the selected font faces.
 The patch is based on upstream PR #7979. It does not change Windows rendering.
 
 ## Branches
