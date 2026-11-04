@@ -185,8 +185,12 @@ jobs:
           set -euo pipefail
           printf 'Upstream macOS nightly commit %s plus the experimental CoreText renderer, fork commit %s (branch macos-coretext).\n' "$BASE" "$SHA" > notes.txt
           version=$(cat macos-version.txt)
-          gh release view "macos-$version" >/dev/null 2>&1 || gh release create --prerelease --target "$SHA" --title "macOS $version" --notes-file notes.txt "macos-$version"
-          gh release upload --clobber "macos-$version" WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
+          if gh release view "macos-$version" >/dev/null 2>&1; then
+            gh release download "macos-$version" --clobber --pattern WezTerm-macos-nightly.zip --pattern WezTerm-macos-nightly.zip.sha256
+            sha256sum --check WezTerm-macos-nightly.zip.sha256
+          else
+            gh release create --prerelease --target "$SHA" --title "macOS $version" --notes-file notes.txt "macos-$version" WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
+          fi
           gh release view macos-nightly >/dev/null 2>&1 || gh release create --prerelease --target "$SHA" --title 'macOS nightly' --notes 'macOS build publication in progress.' macos-nightly
           gh release upload --clobber macos-nightly WezTerm-macos-nightly.zip WezTerm-macos-nightly.zip.sha256
       - name: Update the fork's Homebrew cask
