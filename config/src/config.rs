@@ -287,6 +287,9 @@ pub struct Config {
     pub font_locator: FontLocatorSelection,
     #[dynamic(default)]
     pub font_rasterizer: FontRasterizerSelection,
+    #[cfg(target_os = "macos")]
+    #[dynamic(default = "default_true")]
+    pub core_text_font_smoothing: bool,
     #[dynamic(default = "default_colr_rasterizer")]
     pub font_colr_rasterizer: FontRasterizerSelection,
     #[dynamic(default)]

@@ -30,6 +30,7 @@ pub struct CoreTextRasterizer {
     has_color: bool,
     synthesize_italic: bool,
     scale: f64,
+    font_smoothing: bool,
 }
 
 impl CoreTextRasterizer {
@@ -55,6 +56,7 @@ impl CoreTextRasterizer {
             has_color,
             synthesize_italic: parsed.synthesize_italic,
             scale: parsed.scale.unwrap_or(1.0),
+            font_smoothing: config::configuration().core_text_font_smoothing,
         })
     }
 }
@@ -287,8 +289,8 @@ impl FontRasterizer for CoreTextRasterizer {
             bitmap_info,
         );
 
-        ctx.set_allows_font_smoothing(true);
-        ctx.set_should_smooth_fonts(true);
+        ctx.set_allows_font_smoothing(self.font_smoothing);
+        ctx.set_should_smooth_fonts(self.font_smoothing);
         ctx.set_allows_antialiasing(true);
         ctx.set_should_antialias(true);
         ctx.set_allows_font_subpixel_positioning(true);
@@ -323,6 +325,62 @@ impl FontRasterizer for CoreTextRasterizer {
 mod tests {
     use super::*;
     use crate::locator::FontOrigin;
+
+    #[test]
+    fn disabling_smoothing_reduces_ink_without_changing_the_face_or_bounds() {
+        let source = FontDataSource::BuiltIn {
+            name: "JetBrainsMono-Regular.ttf",
+            data: include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf"),
+        };
+        let mut fonts = vec![];
+        crate::parser::parse_and_collect_font_info(&source, &mut fonts, FontOrigin::BuiltIn);
+        let mut rasterizer = CoreTextRasterizer::from_locator(&fonts[0]).unwrap();
+        let mut plain_ink = 0u64;
+        let mut smoothed_ink = 0u64;
+        let mut partial_coverage = false;
+        for character in "AgimMW0123456789".encode_utf16() {
+            let mut glyph_id = 0u16;
+            assert!(unsafe {
+                rasterizer
+                    .ct_font
+                    .get_glyphs_for_characters(&character, &mut glyph_id, 1)
+            });
+            rasterizer.font_smoothing = false;
+            let plain = rasterizer
+                .rasterize_glyph(glyph_id as u32, 15.0, 72)
+                .unwrap();
+            rasterizer.font_smoothing = true;
+            let smoothed = rasterizer
+                .rasterize_glyph(glyph_id as u32, 15.0, 72)
+                .unwrap();
+            assert_eq!(
+                (plain.width, plain.height, plain.bearing_x, plain.bearing_y),
+                (
+                    smoothed.width,
+                    smoothed.height,
+                    smoothed.bearing_x,
+                    smoothed.bearing_y
+                )
+            );
+            for pixel in plain.data.chunks_exact(4) {
+                plain_ink += pixel[3] as u64;
+                partial_coverage |= pixel[3] > 0 && pixel[3] < 255;
+            }
+            smoothed_ink += smoothed
+                .data
+                .chunks_exact(4)
+                .map(|pixel| pixel[3] as u64)
+                .sum::<u64>();
+        }
+        assert!(
+            partial_coverage,
+            "Disabling smoothing must preserve antialiasing"
+        );
+        assert!(
+            plain_ink * 100 < smoothed_ink * 90,
+            "Disabling smoothing must remove stroke thickening: {plain_ink} vs {smoothed_ink}"
+        );
+    }
 
     fn visible_height(glyph: &RasterizedGlyph) -> usize {
         let rows: Vec<_> = glyph
