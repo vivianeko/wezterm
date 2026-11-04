@@ -14,12 +14,6 @@ on:
         description: "Publish the validated build to macos-nightly"
         type: boolean
         default: false
-  pull_request:
-    branches: [ci]
-    paths: [.github/workflows/fork-macos-nightly.yml]
-  push:
-    branches: [ci]
-    paths: [.github/workflows/fork-macos-nightly.yml]
 
 permissions:
   contents: read

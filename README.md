@@ -44,9 +44,9 @@ SHA-256 file. It supports Apple Silicon Macs. The
 bundle is ad hoc signed and is not notarized by Apple. macOS builds and updates
 do not block the Windows release.
 
-The macOS workflow runs twice a day and skips a build that is already released.
-Workflow pull requests build and test an artifact without publishing it. Manual
-runs also produce artifacts by default; enable `publish` to update the release.
+The macOS workflow checks for source updates twice a day and skips a build
+that is already released. It builds only for Apple Silicon. Manual runs
+produce artifacts by default; enable `publish` to update the release.
 The `source_ref` input can validate another branch or commit, but cannot be
 combined with publication.
 
