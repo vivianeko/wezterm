@@ -1,7 +1,7 @@
 # WezTerm fork
 
-This fork publishes separate Windows and macOS builds from upstream nightly
-commits. Each platform keeps its own patch branch and release.
+This fork publishes Windows builds from upstream nightly commits with one
+patch on top.
 
 On Windows, upstream's `wm_paint` handler returns during its frame throttle
 without validating the window's update region. Windows therefore re-sends
@@ -10,22 +10,17 @@ window shares, spins until the throttle timer fires. A lower `max_fps` makes
 the spin longer. The fix validates the region before returning, so the timer
 alone schedules the next paint.
 
-On macOS, an experimental CoreText renderer uses the native font drawing APIs
-instead of FreeType. Select it with `config.font_rasterizer = "CoreText"`.
-Use `config.core_text_font_smoothing = false` to disable extra stroke
-thickening while keeping antialiasing and the selected font faces.
-The patch is based on upstream PR #7979. It does not change Windows rendering.
 
 ## Branches
 
 - `windows-paint-throttle`: upstream's latest Windows nightly commit plus the
   fix as a single commit. A workflow rebases it whenever upstream publishes a
   new nightly.
-- `macos-coretext`: upstream's latest macOS nightly commit plus the CoreText
-  renderer. Its workflow rebases it independently of the Windows branch.
-- `ci`: the default branch. It holds this file, the fork's Homebrew cask, and
-  the two workflow files, because GitHub runs scheduled
-  workflows from the default branch only. Keeping upstream's workflow files
+- `macos-coretext`: an experimental CoreText font renderer for macOS, based
+  on upstream PR #7979. It is no longer built or released; macOS uses
+  upstream's nightly instead.
+- `ci`: the default branch. It holds this file and the workflow file, because
+  GitHub runs scheduled workflows from the default branch only. Keeping upstream's workflow files
   off the default branch means none of them run here.
 - `main`: a mirror of upstream `main`. Nothing runs from it.
 
@@ -40,20 +35,3 @@ release notes name the upstream commit and the fork commit that were built.
 If upstream changes `window/src/os/windows/window.rs` around `wm_paint`, the
 rebase conflicts, the run fails, and the release stops advancing until the
 branch is rebased by hand.
-
-The separate `macos-nightly` release holds `WezTerm-macos-nightly.zip` and its
-SHA-256 file. It supports Apple Silicon Macs. The
-bundle is ad hoc signed and is not notarized by Apple. macOS builds and updates
-do not block the Windows release.
-
-The macOS workflow checks for source updates twice a day and skips a build
-that is already released. It builds only for Apple Silicon. Manual runs
-produce artifacts by default; enable `publish` to update the release.
-The `source_ref` input can validate another branch or commit, but cannot be
-combined with publication.
-
-Each published macOS build updates `Casks/wezterm-fork.rb` with its exact
-version and SHA-256, using a versioned release URL so a newer nightly cannot
-invalidate an older cask's checksum. Install it through the `vivianeko/wezterm` tap, using
-`https://github.com/vivianeko/wezterm` as the tap URL. This keeps Homebrew
-updates on the fork rather than replacing the app with an upstream build.
